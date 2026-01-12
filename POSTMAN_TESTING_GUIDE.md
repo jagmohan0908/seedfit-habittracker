@@ -116,9 +116,16 @@ http://localhost:3000/api/v1/support/tickets?user_id=gid://shopify/Customer/8971
 
 **Endpoint:** `GET /api/v1/support/tickets/:id`
 
-**Example URL:**
+**URL Parameter:**
+- `:id` = Ticket ID (UUID) **OR** Ticket Number (e.g., `TKT-2026-000001`)
+
+**Example URLs:**
 ```
+# Using Ticket ID (UUID)
 http://localhost:3000/api/v1/support/tickets/c863dfbb-1db8-412d-b52d-b767d9be0a34
+
+# Using Ticket Number
+http://localhost:3000/api/v1/support/tickets/TKT-2026-000001
 ```
 
 **Response:**
@@ -152,7 +159,7 @@ Content-Type: application/json
 ```
 
 **URL Parameter:**
-- `:id` = Ticket ID (e.g., `c863dfbb-1db8-412d-b52d-b767d9be0a34`)
+- `:id` = Ticket ID (UUID) **OR** Ticket Number (e.g., `TKT-2026-000001`)
 
 **Body (JSON) - User Message:**
 ```json
@@ -201,7 +208,9 @@ Content-Type: application/json
 ```
 
 **URL Parameter:**
-- `:id` = Ticket ID (e.g., `c863dfbb-1db8-412d-b52d-b767d9be0a34`)
+- `:id` = Ticket ID (UUID) **OR** Ticket Number (e.g., `TKT-2026-000001`)
+
+**💡 Tip for Agents:** You can use the ticket number (e.g., `TKT-2026-000001`) instead of the UUID if you only have the ticket number from the customer!
 
 **Body (JSON) - Agent Message:**
 ```json
@@ -214,9 +223,13 @@ Content-Type: application/json
 }
 ```
 
-**Example URL:**
+**Example URLs:**
 ```
+# Using Ticket ID (UUID)
 POST http://localhost:3000/api/v1/support/tickets/c863dfbb-1db8-412d-b52d-b767d9be0a34/messages
+
+# Using Ticket Number (easier for agents!)
+POST http://localhost:3000/api/v1/support/tickets/TKT-2026-000001/messages
 ```
 
 **Key Points for Agent Replies:**
@@ -251,15 +264,22 @@ POST http://localhost:3000/api/v1/support/tickets/c863dfbb-1db8-412d-b52d-b767d9
 
 **Endpoint:** `GET /api/v1/support/tickets/:id/messages`
 
+**URL Parameter:**
+- `:id` = Ticket ID (UUID) **OR** Ticket Number (e.g., `TKT-2026-000001`)
+
 **Query Parameters:**
 ```
 page: 1 (optional)
 limit: 50 (optional)
 ```
 
-**Example URL:**
+**Example URLs:**
 ```
+# Using Ticket ID (UUID)
 http://localhost:3000/api/v1/support/tickets/c863dfbb-1db8-412d-b52d-b767d9be0a34/messages?page=1&limit=50
+
+# Using Ticket Number
+http://localhost:3000/api/v1/support/tickets/TKT-2026-000001/messages?page=1&limit=50
 ```
 
 **Response:**
@@ -307,7 +327,7 @@ Content-Type: application/json
 ```
 
 **URL Parameter:**
-- `:id` = Ticket ID (e.g., `c863dfbb-1db8-412d-b52d-b767d9be0a34`)
+- `:id` = Ticket ID (UUID) **OR** Ticket Number (e.g., `TKT-2026-000001`)
 
 **Body (JSON) - Update Status:**
 ```json
@@ -331,9 +351,13 @@ Content-Type: application/json
 - `"high"` - High priority
 - `"urgent"` - Urgent priority
 
-**Example URL:**
+**Example URLs:**
 ```
+# Using Ticket ID (UUID)
 PATCH http://localhost:3000/api/v1/support/tickets/c863dfbb-1db8-412d-b52d-b767d9be0a34
+
+# Using Ticket Number
+PATCH http://localhost:3000/api/v1/support/tickets/TKT-2026-000001
 ```
 
 **Example 1: Change Status to "In Progress"**
@@ -397,6 +421,9 @@ PATCH http://localhost:3000/api/v1/support/tickets/c863dfbb-1db8-412d-b52d-b767d
 Content-Type: application/json
 ```
 
+**URL Parameter:**
+- `:id` = Ticket ID (UUID) **OR** Ticket Number (e.g., `TKT-2026-000001`)
+
 **Body (JSON):**
 ```json
 {
@@ -404,9 +431,13 @@ Content-Type: application/json
 }
 ```
 
-**Example URL:**
+**Example URLs:**
 ```
+# Using Ticket ID (UUID)
 POST http://localhost:3000/api/v1/support/tickets/c863dfbb-1db8-412d-b52d-b767d9be0a34/messages/read
+
+# Using Ticket Number
+POST http://localhost:3000/api/v1/support/tickets/TKT-2026-000001/messages/read
 ```
 
 ---
@@ -454,8 +485,9 @@ GET http://localhost:3000/api/v1/support/tickets/{ticket.id}/messages
 ## Important Notes
 
 1. **Targeting a User:** To reply to a specific user's ticket, you need:
-   - The `ticket.id` (from GET /api/v1/support/tickets with user_id)
-   - Use that ticket ID in the URL: `/api/v1/support/tickets/{ticket.id}/messages`
+   - The `ticket.id` (UUID) **OR** `ticket.ticket_number` (e.g., `TKT-2026-000001`) from GET /api/v1/support/tickets with user_id
+   - Use that ticket ID or ticket number in the URL: `/api/v1/support/tickets/{ticket.id}/messages` or `/api/v1/support/tickets/{ticket.ticket_number}/messages`
+   - **💡 Tip:** Agents can use ticket numbers directly if they only have the ticket number from the customer!
 
 2. **Agent vs User Messages:**
    - User messages: `sender_type: "user"` (default)
@@ -490,8 +522,9 @@ GET http://localhost:3000/api/v1/support/tickets/{ticket.id}/messages
 - Make sure `user_id` is included in the request
 
 **Error: "Ticket not found"**
-- Verify the ticket ID is correct
+- Verify the ticket ID (UUID) or ticket number is correct
 - Check if the ticket belongs to the user_id you're querying
+- Make sure you're using the correct format: UUID (e.g., `c863dfbb-1db8-412d-b52d-b767d9be0a34`) or ticket number (e.g., `TKT-2026-000001`)
 
 **Messages not appearing:**
 - Check `sender_type` is set correctly ("user" or "agent")

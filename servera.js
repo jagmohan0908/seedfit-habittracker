@@ -41,7 +41,7 @@ const pool = new Pool({
   port: parseInt(process.env.DB_PORT || '5432'),
   database: process.env.DB_NAME || 'support_tickets',
   user: process.env.DB_USER || 'dba',
-  password: process.env.DB_PASSWORD || '', 
+  password: process.env.DB_PASSWORD || 'Siya_A830-lsuhjJF', // Using password directly for now
 });
 
 // Test database connection
@@ -330,30 +330,16 @@ app.get('/api/v1/support/tickets', async (req, res) => {
 // ============================================
 // 3. GET TICKET DETAILS WITH MESSAGES
 // GET /api/v1/support/tickets/:id
-// Supports both UUID (ticket ID) and ticket_number (e.g., TKT-2026-000001)
 // ============================================
 app.get('/api/v1/support/tickets/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Check if id is a UUID or ticket_number
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const isUUID = uuidRegex.test(id);
-
-    let ticketResult;
-    if (isUUID) {
-      // Query by ticket ID (UUID)
-      ticketResult = await pool.query(
-        'SELECT * FROM tickets WHERE id = $1',
-        [id]
-      );
-    } else {
-      // Query by ticket_number (e.g., TKT-2026-000001)
-      ticketResult = await pool.query(
-        'SELECT * FROM tickets WHERE ticket_number = $1',
-        [id]
-      );
-    }
+    // Get ticket
+    const ticketResult = await pool.query(
+      'SELECT * FROM tickets WHERE id = $1',
+      [id]
+    );
 
     if (ticketResult.rows.length === 0) {
       return res.status(404).json({
@@ -362,16 +348,12 @@ app.get('/api/v1/support/tickets/:id', async (req, res) => {
       });
     }
 
-    // Get the actual ticket ID (UUID) from the result
-    // This is important when ticket_number was used instead of UUID
-    const ticketId = ticketResult.rows[0].id;
-
-    // Get messages for this ticket (use actual ticket ID)
+    // Get messages for this ticket
     const messagesResult = await pool.query(
       `SELECT * FROM ticket_messages
        WHERE ticket_id = $1
        ORDER BY created_at ASC`,
-      [ticketId]
+      [id]
     );
 
     res.json({
@@ -415,25 +397,11 @@ app.post('/api/v1/support/tickets/:id/messages', async (req, res) => {
       });
     }
 
-    // Check if id is a UUID or ticket_number
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const isUUID = uuidRegex.test(id);
-
     // Verify ticket exists
-    let ticketResult;
-    if (isUUID) {
-      // Query by ticket ID (UUID)
-      ticketResult = await pool.query(
-        'SELECT * FROM tickets WHERE id = $1',
-        [id]
-      );
-    } else {
-      // Query by ticket_number (e.g., TKT-2026-000001)
-      ticketResult = await pool.query(
-        'SELECT * FROM tickets WHERE ticket_number = $1',
-        [id]
-      );
-    }
+    const ticketResult = await pool.query(
+      'SELECT * FROM tickets WHERE id = $1',
+      [id]
+    );
 
     if (ticketResult.rows.length === 0) {
       return res.status(404).json({
@@ -443,8 +411,6 @@ app.post('/api/v1/support/tickets/:id/messages', async (req, res) => {
     }
 
     const ticket = ticketResult.rows[0];
-    // Use the actual ticket ID (UUID) for message insertion
-    const ticketId = ticket.id;
 
     // Determine sender info based on sender_type
     let finalSenderType = sender_type === 'agent' ? 'agent' : 'user';
@@ -471,14 +437,14 @@ app.post('/api/v1/support/tickets/:id/messages', async (req, res) => {
       }
     }
 
-    // Insert message (use actual ticket ID from database)
+    // Insert message
     const insertResult = await pool.query(
       `INSERT INTO ticket_messages (
         ticket_id, sender_type, sender_id, sender_name, message, attachments
       ) VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *`,
       [
-        ticketId,
+        id,
         finalSenderType,
         finalSenderId,
         finalSenderName,
@@ -490,7 +456,7 @@ app.post('/api/v1/support/tickets/:id/messages', async (req, res) => {
     // Update ticket updated_at timestamp
     await pool.query(
       'UPDATE tickets SET updated_at = CURRENT_TIMESTAMP WHERE id = $1',
-      [ticketId]
+      [id]
     );
 
     res.status(201).json({
@@ -512,7 +478,6 @@ app.post('/api/v1/support/tickets/:id/messages', async (req, res) => {
 // ============================================
 // 5. GET TICKET MESSAGES (with pagination)
 // GET /api/v1/support/tickets/:id/messages?page=1&limit=50
-// Supports both UUID (ticket ID) and ticket_number
 // ============================================
 app.get('/api/v1/support/tickets/:id/messages', async (req, res) => {
   try {
@@ -520,34 +485,12 @@ app.get('/api/v1/support/tickets/:id/messages', async (req, res) => {
     const { page = 1, limit = 50 } = req.query;
     const offset = (page - 1) * limit;
 
-    // Check if id is a UUID or ticket_number
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const isUUID = uuidRegex.test(id);
-
-    let ticketId;
-    if (isUUID) {
-      ticketId = id;
-    } else {
-      // Get ticket ID from ticket_number
-      const ticketResult = await pool.query(
-        'SELECT id FROM tickets WHERE ticket_number = $1',
-        [id]
-      );
-      if (ticketResult.rows.length === 0) {
-        return res.status(404).json({
-          success: false,
-          message: 'Ticket not found',
-        });
-      }
-      ticketId = ticketResult.rows[0].id;
-    }
-
     const result = await pool.query(
       `SELECT * FROM ticket_messages
        WHERE ticket_id = $1
        ORDER BY created_at ASC
        LIMIT $2 OFFSET $3`,
-      [ticketId, parseInt(limit), offset]
+      [id, parseInt(limit), offset]
     );
 
     res.json({
@@ -574,34 +517,11 @@ app.get('/api/v1/support/tickets/:id/messages', async (req, res) => {
 // ============================================
 // 6. UPDATE TICKET STATUS
 // PATCH /api/v1/support/tickets/:id
-// Supports both UUID (ticket ID) and ticket_number
 // ============================================
 app.patch('/api/v1/support/tickets/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { status, assigned_to, assigned_to_name, category, priority } = req.body;
-
-    // Check if id is a UUID or ticket_number
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const isUUID = uuidRegex.test(id);
-
-    let ticketId;
-    if (isUUID) {
-      ticketId = id;
-    } else {
-      // Get ticket ID from ticket_number
-      const ticketResult = await pool.query(
-        'SELECT id FROM tickets WHERE ticket_number = $1',
-        [id]
-      );
-      if (ticketResult.rows.length === 0) {
-        return res.status(404).json({
-          success: false,
-          message: 'Ticket not found',
-        });
-      }
-      ticketId = ticketResult.rows[0].id;
-    }
 
     // Build dynamic update query
     const updateFields = [];
@@ -678,7 +598,7 @@ app.patch('/api/v1/support/tickets/:id', async (req, res) => {
     
     // Add ticket ID for WHERE clause
     paramCount++;
-    params.push(ticketId);
+    params.push(id);
 
     const result = await pool.query(
       `UPDATE tickets
@@ -714,34 +634,11 @@ app.patch('/api/v1/support/tickets/:id', async (req, res) => {
 // ============================================
 // 7. MARK MESSAGES AS READ
 // POST /api/v1/support/tickets/:id/messages/read
-// Supports both UUID (ticket ID) and ticket_number
 // ============================================
 app.post('/api/v1/support/tickets/:id/messages/read', async (req, res) => {
   try {
     const { id } = req.params;
     const { message_ids } = req.body;
-
-    // Check if id is a UUID or ticket_number
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const isUUID = uuidRegex.test(id);
-
-    let ticketId;
-    if (isUUID) {
-      ticketId = id;
-    } else {
-      // Get ticket ID from ticket_number
-      const ticketResult = await pool.query(
-        'SELECT id FROM tickets WHERE ticket_number = $1',
-        [id]
-      );
-      if (ticketResult.rows.length === 0) {
-        return res.status(404).json({
-          success: false,
-          message: 'Ticket not found',
-        });
-      }
-      ticketId = ticketResult.rows[0].id;
-    }
 
     if (message_ids && message_ids.length > 0) {
       // Mark specific messages as read
@@ -749,7 +646,7 @@ app.post('/api/v1/support/tickets/:id/messages/read', async (req, res) => {
         `UPDATE ticket_messages
          SET is_read = TRUE, read_at = CURRENT_TIMESTAMP
          WHERE ticket_id = $1 AND id = ANY($2)`,
-        [ticketId, message_ids]
+        [id, message_ids]
       );
     } else {
       // Mark all agent messages as read
@@ -757,7 +654,7 @@ app.post('/api/v1/support/tickets/:id/messages/read', async (req, res) => {
         `UPDATE ticket_messages
          SET is_read = TRUE, read_at = CURRENT_TIMESTAMP
          WHERE ticket_id = $1 AND sender_type = 'agent'`,
-        [ticketId]
+        [id]
       );
     }
 
