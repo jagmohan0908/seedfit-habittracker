@@ -148,16 +148,21 @@ app.get('/api/v1/users/profile/:userId', async (req, res) => {
     if (!userId) {
       return res.status(400).json({ success: false, message: 'user_id required' });
     }
+    console.log(`👤 [PROFILE] GET profile for user_id=${userId}`);
     const result = await pool.query(
       'SELECT user_id, name, email, phone, avatar_url, created_at, updated_at FROM user_profiles WHERE user_id = $1',
       [userId]
     );
     if (result.rows.length === 0) {
+      console.log(`👤 [PROFILE] No profile row found for user_id=${userId}`);
       return res.json({ success: true, data: null });
     }
+    console.log(
+      `👤 [PROFILE] Found profile for user_id=${userId}, avatar_url=${result.rows[0].avatar_url || '(none)'}`
+    );
     res.json({ success: true, data: result.rows[0] });
   } catch (err) {
-    console.error('GET /api/v1/users/profile error:', err);
+    console.error('❌ [PROFILE] GET /api/v1/users/profile error:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -169,7 +174,11 @@ app.post('/api/v1/users/profile/avatar-upload-url', async (req, res) => {
     if (!user_id) {
       return res.status(400).json({ success: false, message: 'user_id required' });
     }
+    console.log(
+      `📸 [AVATAR] Pre-signed URL request for user_id=${user_id}, mime_type=${avatar_mime_type || 'image/jpeg'}`
+    );
     if (!s3Config) {
+      console.error('❌ [AVATAR] S3 not configured (missing S3_BUCKET_NAME)');
       return res.status(500).json({
         success: false,
         message: 'S3 not configured on server (missing S3_BUCKET_NAME)',
@@ -178,12 +187,16 @@ app.post('/api/v1/users/profile/avatar-upload-url', async (req, res) => {
     const mime = avatar_mime_type || 'image/jpeg';
     const result = await generateAvatarUploadUrl(user_id, mime);
     if (!result) {
+      console.error('❌ [AVATAR] Failed to generate pre-signed URL', { user_id, mime });
       return res.status(500).json({
         success: false,
         message: 'Failed to generate pre-signed URL',
       });
     }
     const { uploadUrl, fileUrl, key, expiresIn } = result;
+    console.log(
+      `📸 [AVATAR] Pre-signed URL generated for user_id=${user_id}, key=${key}, expires_in=${expiresIn}s`
+    );
     res.json({
       success: true,
       upload_url: uploadUrl,
@@ -205,6 +218,9 @@ app.put('/api/v1/users/profile', async (req, res) => {
     if (!user_id) {
       return res.status(400).json({ success: false, message: 'user_id required' });
     }
+    console.log(
+      `👤 [PROFILE] PUT profile for user_id=${user_id}, has_avatar_url=${!!avatar_url}, has_avatar_base64=${!!avatar_base64}`
+    );
     let finalAvatarUrl = avatar_url || null;
     if (avatar_base64 && typeof avatar_base64 === 'string') {
       const buffer = Buffer.from(avatar_base64, 'base64');
@@ -225,9 +241,12 @@ app.put('/api/v1/users/profile', async (req, res) => {
          updated_at = now()`,
       [user_id, name || null, email || null, phone || null, finalAvatarUrl]
     );
+    console.log(
+      `👤 [PROFILE] Profile upserted for user_id=${user_id}, final_avatar_url=${finalAvatarUrl || '(none)'}`
+    );
     res.json({ success: true, message: 'Profile updated', avatar_url: finalAvatarUrl });
   } catch (err) {
-    console.error('PUT /api/v1/users/profile error:', err);
+    console.error('❌ [PROFILE] PUT /api/v1/users/profile error:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
