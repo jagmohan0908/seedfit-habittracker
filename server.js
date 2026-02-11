@@ -7,6 +7,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 // Load .env file
 require('dotenv').config();
@@ -95,22 +96,49 @@ const s3Config = (() => {
   };
 })();
 
+async function generateAvatarUploadUrl(userId, mimeType) {
+  if (!s3Config) {
+    console.warn('S3 not configured (S3_BUCKET_NAME); cannot generate pre-signed URL');
+    return null;
+  }
+  const ext = mimeType === 'image/png' ? 'png' : 'jpg';
+  const key = `user-profiles/${userId}.${ext}`;
+  const command = new PutObjectCommand({
+    Bucket: s3Config.bucket,
+    Key: key,
+    ContentType: mimeType || 'image/jpeg',
+  });
+  const expiresIn = 15 * 60; // 15 minutes
+  const uploadUrl = await getSignedUrl(s3Config.client, command, { expiresIn });
+  const fileUrl = `${s3Config.publicBaseUrl.replace(/\/$/, '')}/${key}`;
+  console.log(`✅ Generated pre-signed avatar upload URL for user_id=${userId}, key=${key}`);
+  return { uploadUrl, fileUrl, key, expiresIn };
+}
+
 async function uploadAvatarToS3(userId, buffer, mimeType) {
   if (!s3Config) {
     console.warn('S3 not configured (S3_BUCKET_NAME); skipping upload');
     return null;
   }
-  const ext = mimeType === 'image/png' ? 'png' : 'jpg';
-  const key = `user-profiles/${userId}.${ext}`;
-  await s3Config.client.send(
-    new PutObjectCommand({
-      Bucket: s3Config.bucket,
-      Key: key,
-      Body: buffer,
-      ContentType: mimeType || 'image/jpeg',
-    })
-  );
-  return `${s3Config.publicBaseUrl.replace(/\/$/, '')}/${key}`;
+  try {
+    const ext = mimeType === 'image/png' ? 'png' : 'jpg';
+    const key = `user-profiles/${userId}.${ext}`;
+    await s3Config.client.send(
+      new PutObjectCommand({
+        Bucket: s3Config.bucket,
+        Key: key,
+        Body: buffer,
+        ContentType: mimeType || 'image/jpeg',
+      })
+    );
+    const url = `${s3Config.publicBaseUrl.replace(/\/$/, '')}/${key}`;
+    console.log(`✅ S3 avatar upload success for user_id=${userId}, key=${key}`);
+    console.log(`🔗 Avatar URL: ${url}`);
+    return url;
+  } catch (err) {
+    console.error(`❌ S3 avatar upload failed for user_id=${userId}:`, err);
+    return null;
+  }
 }
 
 // GET /api/v1/users/profile/:userId - get user profile (avatar_url = S3 URL from Postgres)
@@ -130,6 +158,42 @@ app.get('/api/v1/users/profile/:userId', async (req, res) => {
     res.json({ success: true, data: result.rows[0] });
   } catch (err) {
     console.error('GET /api/v1/users/profile error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /api/v1/users/profile/avatar-upload-url - generate pre-signed S3 URL for direct client upload
+app.post('/api/v1/users/profile/avatar-upload-url', async (req, res) => {
+  try {
+    const { user_id, avatar_mime_type } = req.body;
+    if (!user_id) {
+      return res.status(400).json({ success: false, message: 'user_id required' });
+    }
+    if (!s3Config) {
+      return res.status(500).json({
+        success: false,
+        message: 'S3 not configured on server (missing S3_BUCKET_NAME)',
+      });
+    }
+    const mime = avatar_mime_type || 'image/jpeg';
+    const result = await generateAvatarUploadUrl(user_id, mime);
+    if (!result) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to generate pre-signed URL',
+      });
+    }
+    const { uploadUrl, fileUrl, key, expiresIn } = result;
+    res.json({
+      success: true,
+      upload_url: uploadUrl,
+      file_url: fileUrl,
+      key,
+      expires_in: expiresIn,
+      message: 'Use upload_url to PUT the image file directly to S3, then call PUT /api/v1/users/profile with avatar_url=file_url',
+    });
+  } catch (err) {
+    console.error('POST /api/v1/users/profile/avatar-upload-url error:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
