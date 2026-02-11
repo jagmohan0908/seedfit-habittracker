@@ -1,99 +1,63 @@
-# Support Ticket API - Node.js Backend
+# Seedfit Backend
 
-RESTful API for customer support ticket management system built with Node.js, Express, and PostgreSQL.
+Node.js API for **Seedfit app**: support tickets and habit tracker. Uses Express and PostgreSQL.
 
-## Features
+## Stack
 
-- ✅ Create support tickets
-- ✅ View user tickets
-- ✅ Real-time messaging
-- ✅ Agent replies
-- ✅ Ticket status management
-- ✅ Priority management
-- ✅ Ticket assignment
-- ✅ Message read status
+- **Node.js** + **Express**
+- **PostgreSQL** (your existing database)
+- **dotenv** for config
 
-## Tech Stack
+## Setup
 
-- **Runtime:** Node.js
-- **Framework:** Express.js
-- **Database:** PostgreSQL
-- **Environment:** dotenv
-
-## Quick Start
-
-### 1. Install Dependencies
+### 1. Install
 
 ```bash
+cd backend
 npm install
 ```
 
-### 2. Configure Environment
+### 2. Environment
 
-Create `.env` file:
+Create a `.env` file in the `backend` folder:
 
 ```env
 PORT=3000
-DB_HOST=13.202.148.229
+DB_HOST=your_postgres_host
 DB_PORT=5432
-DB_NAME=support_tickets
-DB_USER=dba
+DB_NAME=your_database_name
+DB_USER=your_user
 DB_PASSWORD=your_password
-NODE_ENV=development
 ```
 
-### 3. Start Server
+### 3. Database
 
-**Development:**
+Run the schema in your Postgres database (e.g. pgAdmin → Query Tool):
+
+- Open `seedfit_postgres.sql` and execute it in your database.
+
+### 4. Run
+
 ```bash
 npm start
 ```
 
-**Production (with PM2):**
-```bash
-pm2 start server.js --name "support-ticket-api"
-```
+Server runs at `http://localhost:3000`. Check: [http://localhost:3000/api/health](http://localhost:3000/api/health)
 
-## API Endpoints
+## API
 
-### Health Check
-- `GET /api/health` - Server health check
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/health` | Health check |
+| `POST /api/v1/support/tickets` | Create support ticket |
+| `GET /api/v1/support/tickets` | List user tickets |
+| `GET /api/v1/habits/tracker/:userId` | Get habit tracker data |
+| `POST /api/v1/habits/daily-compliance` | Save daily habit compliance |
 
-### Tickets
-- `POST /api/v1/support/tickets` - Create ticket
-- `GET /api/v1/support/tickets` - Get user tickets
-- `GET /api/v1/support/tickets/:id` - Get ticket details
-- `PATCH /api/v1/support/tickets/:id` - Update ticket (status, priority, assignment)
+## Deploy on Render
 
-### Messages
-- `POST /api/v1/support/tickets/:id/messages` - Send message
-- `GET /api/v1/support/tickets/:id/messages` - Get messages
-- `POST /api/v1/support/tickets/:id/messages/read` - Mark as read
+See **[RENDER_DEPLOY.md](./RENDER_DEPLOY.md)** for steps. You only need to set `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` in Render environment (no new database).
 
-## Documentation
+## Local testing
 
-- [Postman Testing Guide](./POSTMAN_TESTING_GUIDE.md)
-- [Agent Workflow Guide](./AGENT_WORKFLOW_GUIDE.md)
-- [Deployment Guide](./DEPLOYMENT_GUIDE.md)
-
-## Database Setup
-
-Run the SQL script to create tables:
-
-```bash
-psql -h your_host -U your_user -d your_database -f database_setup.sql
-```
-
-Or use pgAdmin to execute `database_setup.sql`
-
-## Security
-
-- ✅ User authentication required for all endpoints
-- ✅ User can only see their own tickets
-- ✅ Input validation
-- ✅ SQL injection protection (parameterized queries)
-
-## License
-
-MIT
-
+See **[LOCALHOST_CONNECT_AND_TEST_API.md](./LOCALHOST_CONNECT_AND_TEST_API.md)** for local run and API examples.

@@ -10,15 +10,10 @@ const fs = require('fs');
 // Load .env file
 require('dotenv').config();
 
-// Debug: Check if .env file exists and is being loaded
+// Load .env when present (local dev); on Render/Heroku use DATABASE_URL and env vars
 const envPath = path.join(__dirname, '.env');
-console.log('📁 Current directory:', __dirname);
-console.log('📄 Looking for .env at:', envPath);
-console.log('📄 .env file exists?', fs.existsSync(envPath) ? '✅ YES' : '❌ NO');
-
-if (!fs.existsSync(envPath)) {
-  console.error('❌ ERROR: .env file not found at:', envPath);
-  console.error('💡 Please create .env file in the backend folder');
+if (!fs.existsSync(envPath) && !process.env.DATABASE_URL) {
+  console.warn('💡 No .env file; using DATABASE_URL or other env vars for config');
 }
 
 const app = express();
@@ -29,20 +24,26 @@ app.use(cors());
 app.use(express.json());
 
 // PostgreSQL Connection Pool
-// Debug: Check if environment variables are loaded
-console.log('🔍 Environment check:');
-console.log('  DB_HOST:', process.env.DB_HOST || '13.202.148.229 (using default)');
-console.log('  DB_USER:', process.env.DB_USER || 'dba (using default)');
-console.log('  DB_NAME:', process.env.DB_NAME || 'support_tickets (using default)');
-console.log('  DB_PASSWORD:', process.env.DB_PASSWORD ? '***SET FROM .ENV***' : '***USING HARDCODED***');
-
-const pool = new Pool({
-  host: process.env.DB_HOST || '13.202.148.229',
-  port: parseInt(process.env.DB_PORT || '5432'),
-  database: process.env.DB_NAME || 'support_tickets',
-  user: process.env.DB_USER || 'dba',
-  password: process.env.DB_PASSWORD || '', 
-});
+// Supports DATABASE_URL (e.g. Render, Heroku) or DB_HOST/DB_USER/DB_NAME/DB_PASSWORD
+const pool = (() => {
+  if (process.env.DATABASE_URL) {
+    console.log('🔍 Using DATABASE_URL for PostgreSQL');
+    return new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.DATABASE_URL.includes('sslmode=require') || process.env.DATABASE_URL.startsWith('postgresql://')
+        ? { rejectUnauthorized: false }
+        : undefined,
+    });
+  }
+  console.log('🔍 Environment: DB_HOST=', process.env.DB_HOST || '(default)', 'DB_NAME=', process.env.DB_NAME || '(default)');
+  return new Pool({
+    host: process.env.DB_HOST || '13.202.148.229',
+    port: parseInt(process.env.DB_PORT || '5432'),
+    database: process.env.DB_NAME || 'support_tickets',
+    user: process.env.DB_USER || 'dba',
+    password: process.env.DB_PASSWORD || '',
+  });
+})();
 
 // Test database connection
 pool.query('SELECT NOW()', (err, res) => {
@@ -517,7 +518,7 @@ app.post('/api/v1/support/tickets/:id/messages', async (req, res) => {
 app.get('/api/v1/support/tickets/:id/messages', async (req, res) => {
   try {
     const { id } = req.params;
-    const { page = 1, limit = 50 } = req.query;
+    const { page = 1, limit = 50, since } = req.query;
     const offset = (page - 1) * limit;
 
     // Check if id is a UUID or ticket_number
@@ -542,13 +543,30 @@ app.get('/api/v1/support/tickets/:id/messages', async (req, res) => {
       ticketId = ticketResult.rows[0].id;
     }
 
-    const result = await pool.query(
-      `SELECT * FROM ticket_messages
-       WHERE ticket_id = $1
-       ORDER BY created_at ASC
-       LIMIT $2 OFFSET $3`,
-      [ticketId, parseInt(limit), offset]
-    );
+    // Build query with optional since parameter for incremental fetching
+    let query = 'SELECT * FROM ticket_messages WHERE ticket_id = $1';
+    const params = [ticketId];
+    let paramCount = 1;
+
+    // If since parameter is provided, only fetch messages after that timestamp
+    if (since) {
+      try {
+        const sinceDate = new Date(since);
+        if (!isNaN(sinceDate.getTime())) {
+          paramCount++;
+          query += ` AND created_at > $${paramCount}`;
+          params.push(sinceDate.toISOString());
+        }
+      } catch (e) {
+        // Invalid date format, ignore since parameter
+        console.warn('⚠️ Invalid since parameter format:', since);
+      }
+    }
+
+    query += ` ORDER BY created_at ASC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
+    params.push(parseInt(limit), offset);
+
+    const result = await pool.query(query, params);
 
     res.json({
       success: true,
@@ -770,6 +788,217 @@ app.post('/api/v1/support/tickets/:id/messages/read', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to mark messages as read',
+      error: error.message,
+    });
+  }
+});
+
+// ============================================
+// HABIT TRACKER API (Seedfit) - NEW
+// ============================================
+
+// Helper to compute simple compliance score (0..1) based on frequency flags
+function computeComplianceScore({
+  frequency,
+  morning_done,
+  evening_done,
+  use1_done,
+  use2_done,
+}) {
+  if (frequency === 'once_daily') {
+    return morning_done || evening_done || use1_done || use2_done ? 1.0 : 0.0;
+  }
+  if (frequency === 'twice_daily') {
+    let score = 0.0;
+    if (morning_done) score += 0.5;
+    if (evening_done) score += 0.5;
+    return score;
+  }
+  if (frequency === 'twice_weekly') {
+    let score = 0.0;
+    if (use1_done) score += 0.5;
+    if (use2_done) score += 0.5;
+    return score;
+  }
+  return 0.0;
+}
+
+// POST /api/v1/habits/daily-compliance
+// Upsert daily compliance for a single habit on a given day
+app.post('/api/v1/habits/daily-compliance', async (req, res) => {
+  try {
+    const {
+      user_id,
+      habit_id,
+      date,
+      usage_frequency = 'twice_daily',
+      morning_done = false,
+      evening_done = false,
+      use1_done = false,
+      use2_done = false,
+      notes = {},
+    } = req.body;
+
+    if (!user_id || !habit_id || !date) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: user_id, habit_id, date',
+      });
+    }
+
+    const day = new Date(date);
+    if (isNaN(day.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid date format',
+      });
+    }
+    const dayOnly = day.toISOString().substring(0, 10); // YYYY-MM-DD
+
+    const complianceScore = computeComplianceScore({
+      frequency: usage_frequency,
+      morning_done,
+      evening_done,
+      use1_done,
+      use2_done,
+    });
+
+    // Upsert into habit_daily_compliance
+    const upsertQuery = `
+      INSERT INTO habit_daily_compliance (
+        user_id, habit_id, day,
+        morning_done, evening_done, use1_done, use2_done,
+        notes, compliance_score, last_updated
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, NOW())
+      ON CONFLICT (user_id, habit_id, day) DO UPDATE SET
+        morning_done     = EXCLUDED.morning_done,
+        evening_done     = EXCLUDED.evening_done,
+        use1_done        = EXCLUDED.use1_done,
+        use2_done        = EXCLUDED.use2_done,
+        notes            = EXCLUDED.notes,
+        compliance_score = EXCLUDED.compliance_score,
+        last_updated     = NOW()
+      RETURNING *;
+    `;
+
+    const { rows: [compliance] } = await pool.query(upsertQuery, [
+      user_id,
+      habit_id,
+      dayOnly,
+      morning_done,
+      evening_done,
+      use1_done,
+      use2_done,
+      JSON.stringify(notes),
+      complianceScore,
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        compliance,
+      },
+    });
+  } catch (error) {
+    console.error('❌ Error upserting daily compliance:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update daily compliance',
+      error: error.message,
+    });
+  }
+});
+
+// GET /api/v1/habits/tracker/:userId
+// Return tracker summary, habits and daily compliance for a user
+app.get('/api/v1/habits/tracker/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  if (!userId) {
+    return res.status(400).json({
+      success: false,
+      message: 'Missing userId',
+    });
+  }
+
+  try {
+    const trackerPromise = pool.query(
+      'SELECT * FROM habit_trackers WHERE user_id = $1',
+      [userId]
+    );
+    const habitsPromise = pool.query(
+      'SELECT * FROM user_habits WHERE user_id = $1 ORDER BY display_order',
+      [userId]
+    );
+    const compliancePromise = pool.query(
+      'SELECT * FROM habit_daily_compliance WHERE user_id = $1',
+      [userId]
+    );
+    const rewardsPromise = pool.query(
+      'SELECT * FROM habit_rewards WHERE user_id = $1 ORDER BY earned_at DESC',
+      [userId]
+    );
+
+    const [trackerRes, habitsRes, complianceRes, rewardsRes] =
+      await Promise.all([
+        trackerPromise,
+        habitsPromise,
+        compliancePromise,
+        rewardsPromise,
+      ]);
+
+    const dailyCompliance = {};
+    for (const row of complianceRes.rows) {
+      const key = row.day.toISOString().substring(0, 10);
+      if (!dailyCompliance[key]) {
+        dailyCompliance[key] = {
+          date: key,
+          completedHabits: {},
+          completedHabitTimes: {},
+          notes: row.notes || {},
+          complianceScore: Number(row.compliance_score || 0),
+          lastUpdated: row.last_updated,
+        };
+      }
+      const entry = dailyCompliance[key];
+
+      // derive per-habit completed flag (for once-daily)
+      const fullyDone =
+        (row.morning_done && row.evening_done) ||
+        (row.use1_done && row.use2_done);
+      if (fullyDone) {
+        entry.completedHabits[row.habit_id] = true;
+      }
+
+      if (row.morning_done) {
+        entry.completedHabitTimes[`${row.habit_id}_morning`] = true;
+      }
+      if (row.evening_done) {
+        entry.completedHabitTimes[`${row.habit_id}_evening`] = true;
+      }
+      if (row.use1_done) {
+        entry.completedHabitTimes[`${row.habit_id}_use1`] = true;
+      }
+      if (row.use2_done) {
+        entry.completedHabitTimes[`${row.habit_id}_use2`] = true;
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        tracker: trackerRes.rows[0] || null,
+        habits: habitsRes.rows,
+        dailyCompliance,
+        rewards: rewardsRes.rows,
+      },
+    });
+  } catch (error) {
+    console.error('❌ Error loading habit tracker:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to load habit tracker',
       error: error.message,
     });
   }
