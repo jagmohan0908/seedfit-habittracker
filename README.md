@@ -28,6 +28,14 @@ DB_PORT=5432
 DB_NAME=your_database_name
 DB_USER=your_user
 DB_PASSWORD=your_password
+
+# Optional: profile avatar → S3 (Flutter → Backend → S3 → Postgres stores URL)
+AWS_ACCESS_KEY_ID=your_access_key
+AWS_SECRET_ACCESS_KEY=your_secret_key
+AWS_REGION=ap-south-1
+S3_BUCKET_NAME=your-bucket-name
+# Optional: custom base URL for S3 (e.g. CloudFront). Default: https://BUCKET.s3.REGION.amazonaws.com
+# S3_PUBLIC_BASE_URL=https://your-cdn.example.com
 ```
 
 ### 3. Database
@@ -49,6 +57,8 @@ Server runs at `http://localhost:3000`. Check: [http://localhost:3000/api/health
 | Endpoint | Description |
 |----------|-------------|
 | `GET /api/health` | Health check |
+| `GET /api/v1/users/profile/:userId` | Get user profile (avatar_url = S3 URL) |
+| `PUT /api/v1/users/profile` | Update profile; send `avatar_base64` → backend uploads to S3, saves URL in Postgres |
 | `POST /api/v1/support/tickets` | Create support ticket |
 | `GET /api/v1/support/tickets` | List user tickets |
 | `GET /api/v1/habits/tracker/:userId` | Get habit tracker data |

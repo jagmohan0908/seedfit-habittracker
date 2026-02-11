@@ -6,6 +6,7 @@ const { Pool } = require('pg');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 
 // Load .env file
 require('dotenv').config();
@@ -67,6 +68,104 @@ app.get('/api/health', (req, res) => {
     message: 'Support Ticket API is running',
     timestamp: new Date().toISOString()
   });
+});
+
+// ============================================
+// USER PROFILE: Flutter → Backend → S3 (file) → Postgres (avatar_url only)
+// ============================================
+
+const s3Config = (() => {
+  const region = process.env.AWS_REGION || 'ap-south-1';
+  const bucket = process.env.S3_BUCKET_NAME;
+  const publicBaseUrl = process.env.S3_PUBLIC_BASE_URL; // e.g. https://your-bucket.s3.ap-south-1.amazonaws.com
+  if (!bucket) return null;
+  return {
+    client: new S3Client({
+      region,
+      credentials: process.env.AWS_ACCESS_KEY_ID
+        ? {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+          }
+        : undefined,
+    }),
+    bucket,
+    region,
+    publicBaseUrl: publicBaseUrl || `https://${bucket}.s3.${region}.amazonaws.com`,
+  };
+})();
+
+async function uploadAvatarToS3(userId, buffer, mimeType) {
+  if (!s3Config) {
+    console.warn('S3 not configured (S3_BUCKET_NAME); skipping upload');
+    return null;
+  }
+  const ext = mimeType === 'image/png' ? 'png' : 'jpg';
+  const key = `user-profiles/${userId}.${ext}`;
+  await s3Config.client.send(
+    new PutObjectCommand({
+      Bucket: s3Config.bucket,
+      Key: key,
+      Body: buffer,
+      ContentType: mimeType || 'image/jpeg',
+    })
+  );
+  return `${s3Config.publicBaseUrl.replace(/\/$/, '')}/${key}`;
+}
+
+// GET /api/v1/users/profile/:userId - get user profile (avatar_url = S3 URL from Postgres)
+app.get('/api/v1/users/profile/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'user_id required' });
+    }
+    const result = await pool.query(
+      'SELECT user_id, name, email, phone, avatar_url, created_at, updated_at FROM user_profiles WHERE user_id = $1',
+      [userId]
+    );
+    if (result.rows.length === 0) {
+      return res.json({ success: true, data: null });
+    }
+    res.json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('GET /api/v1/users/profile error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// PUT /api/v1/users/profile - create or update; avatar_base64 → upload to S3 → save S3 URL in Postgres
+app.put('/api/v1/users/profile', async (req, res) => {
+  try {
+    const { user_id, name, email, phone, avatar_url, avatar_base64, avatar_mime_type } = req.body;
+    if (!user_id) {
+      return res.status(400).json({ success: false, message: 'user_id required' });
+    }
+    let finalAvatarUrl = avatar_url || null;
+    if (avatar_base64 && typeof avatar_base64 === 'string') {
+      const buffer = Buffer.from(avatar_base64, 'base64');
+      if (buffer.length > 0) {
+        const mime = avatar_mime_type || 'image/jpeg';
+        const s3Url = await uploadAvatarToS3(user_id, buffer, mime);
+        if (s3Url) finalAvatarUrl = s3Url;
+      }
+    }
+    await pool.query(
+      `INSERT INTO user_profiles (user_id, name, email, phone, avatar_url, updated_at)
+       VALUES ($1, $2, $3, $4, $5, now())
+       ON CONFLICT (user_id) DO UPDATE SET
+         name = COALESCE(EXCLUDED.name, user_profiles.name),
+         email = COALESCE(EXCLUDED.email, user_profiles.email),
+         phone = COALESCE(EXCLUDED.phone, user_profiles.phone),
+         avatar_url = COALESCE(EXCLUDED.avatar_url, user_profiles.avatar_url),
+         updated_at = now()`,
+      [user_id, name || null, email || null, phone || null, finalAvatarUrl]
+    );
+    res.json({ success: true, message: 'Profile updated', avatar_url: finalAvatarUrl });
+  } catch (err) {
+    console.error('PUT /api/v1/users/profile error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 // ============================================

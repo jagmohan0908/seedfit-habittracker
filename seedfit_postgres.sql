@@ -1,7 +1,7 @@
 -- Seedfit backend - PostgreSQL tables
 -- Run this in your Postgres database (e.g. pgAdmin). Use one database for all tables.
 
--- User profile (name, email, phone, avatar)
+-- User profile: avatar_url = S3 URL (Flutter → Backend → S3 → Postgres)
 CREATE TABLE IF NOT EXISTS user_profiles (
   user_id     TEXT PRIMARY KEY,
   name        TEXT,
