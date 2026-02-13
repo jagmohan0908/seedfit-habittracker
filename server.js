@@ -1092,6 +1092,63 @@ app.post('/api/v1/habits/daily-compliance', async (req, res) => {
   }
 });
 
+// POST /api/v1/habits/sync
+// Upsert user habits (from app when habits are created or updated)
+app.post('/api/v1/habits/sync', async (req, res) => {
+  const { user_id: userId, habits: habitsList } = req.body || {};
+
+  if (!userId || !Array.isArray(habitsList)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Missing user_id or habits array',
+    });
+  }
+
+  try {
+    const client = await pool.connect();
+    try {
+      for (let i = 0; i < habitsList.length; i++) {
+        const h = habitsList[i];
+        const habitId = h.habit_id ?? h.id ?? `habit_${i}`;
+        const name = h.name ?? '';
+        const description = h.description ?? null;
+        const usageFrequency = (h.usage_frequency ?? h.usageFrequency ?? 'twice_daily').toString();
+        const gender = (h.gender ?? 'both').toString();
+        const displayOrder = typeof (h.display_order ?? h.order) === 'number'
+          ? (h.display_order ?? h.order)
+          : parseInt(h.display_order ?? h.order ?? 0, 10) || 0;
+
+        await client.query(
+          `INSERT INTO user_habits (user_id, habit_id, name, description, usage_frequency, gender, display_order, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())
+           ON CONFLICT (user_id, habit_id) DO UPDATE SET
+             name = EXCLUDED.name,
+             description = EXCLUDED.description,
+             usage_frequency = EXCLUDED.usage_frequency,
+             gender = EXCLUDED.gender,
+             display_order = EXCLUDED.display_order,
+             updated_at = now()`,
+          [userId, habitId, name, description, usageFrequency, gender, displayOrder]
+        );
+      }
+      res.json({
+        success: true,
+        message: 'Habits synced',
+        data: { count: habitsList.length },
+      });
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('❌ Error syncing habits:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to sync habits',
+      error: error.message,
+    });
+  }
+});
+
 // GET /api/v1/habits/tracker/:userId
 // Return tracker summary, habits and daily compliance for a user
 app.get('/api/v1/habits/tracker/:userId', async (req, res) => {

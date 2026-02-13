@@ -62,6 +62,7 @@ Server runs at `http://localhost:3000`. Check: [http://localhost:3000/api/health
 | `POST /api/v1/support/tickets` | Create support ticket |
 | `GET /api/v1/support/tickets` | List user tickets |
 | `GET /api/v1/habits/tracker/:userId` | Get habit tracker data |
+| `POST /api/v1/habits/sync` | Upsert user habits (app syncs when habits are created/updated) |
 | `POST /api/v1/habits/daily-compliance` | Save daily habit compliance |
 
 ## Deploy on Render
